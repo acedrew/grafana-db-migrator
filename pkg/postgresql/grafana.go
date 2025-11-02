@@ -129,6 +129,10 @@ var HexDataChanges = []HexChange{
 	// Alert rule data - fixes "invalid character '\\' after object key:value pair" errors
 	{
 		Table:      "alert_rule",
+		ColumnName: "condition",
+	},
+	{
+		Table:      "alert_rule",
 		ColumnName: "data",
 	},
 	{
