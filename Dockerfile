@@ -1,7 +1,10 @@
 FROM golang:1.18 AS builder
 WORKDIR /go/src/github.com/percona/grafana-db-migrator/
 COPY . .
-RUN make
+# Build for the target platform architecture
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN make OS=${TARGETOS} ARCH=${TARGETARCH}
 
 FROM golang:1.18
 WORKDIR /root/
