@@ -152,4 +152,14 @@ var HexDataChanges = []HexChange{
 		Table:      "alert_rule_version",
 		ColumnName: "labels",
 	},
+	// Alert configuration (alertmanager config)
+	{
+		Table:      "alert_configuration",
+		ColumnName: "alertmanager_configuration",
+	},
+	// Legacy alert settings
+	{
+		Table:      "alert",
+		ColumnName: "settings",
+	},
 }
