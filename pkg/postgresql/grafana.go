@@ -79,6 +79,46 @@ func (db *DB) ChangeHEXToText() error {
 	return nil
 }
 
+// FixJSONEscaping fixes backslash escaping in JSON columns for PostgreSQL
+// SQLite exports may have single backslashes where PostgreSQL JSON parser expects double backslashes
+func (db *DB) FixJSONEscaping() error {
+	db.log.Infof("💡 Fixing JSON backslash escaping in alert_rule.data")
+
+	// This uses a PL/pgSQL block to test each row and fix ones with invalid JSON
+	stmt := `
+DO $$
+DECLARE
+    r RECORD;
+    fixed_count INTEGER := 0;
+BEGIN
+    FOR r IN SELECT id FROM alert_rule WHERE data LIKE '%\%' LOOP
+        BEGIN
+            -- Try to parse as JSON
+            PERFORM (SELECT data FROM alert_rule WHERE id = r.id)::jsonb;
+        EXCEPTION WHEN OTHERS THEN
+            -- If it fails, fix the backslash escaping
+            UPDATE alert_rule
+            SET data = REPLACE(data, E'\\', E'\\\\')
+            WHERE id = r.id;
+            fixed_count := fixed_count + 1;
+        END;
+    END LOOP;
+    RAISE NOTICE 'Fixed % alert_rule rows with backslash escaping issues', fixed_count;
+END $$;`
+
+	db.log.Debugln("Executing JSON escaping fix")
+	_, err := db.conn.Exec(stmt)
+	if err != nil {
+		db.log.Warnf("⚠️ Could not fix JSON escaping automatically: %v", err)
+		db.log.Warnf("⚠️ You may need to manually fix alert rules with invalid JSON")
+		// Don't return error - this is a best-effort fix
+		return nil
+	}
+	db.log.Infof("💡 JSON escaping fix completed")
+
+	return nil
+}
+
 func (db *DB) FixHomeDashboard() error {
 	_, err := db.conn.Exec("UPDATE preferences SET home_dashboard_id=0 WHERE org_id=1;")
 	if err != nil {
