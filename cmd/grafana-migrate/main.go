@@ -106,6 +106,12 @@ func main() {
 	}
 	log.Infoln("✅ hex-encoded data values wrapped for insertion")
 
+	// Remove is_paused column from alert_rule if present (schema mismatch)
+	if err := sqlite.RemoveAlertRulePausedColumn(dumpPath); err != nil {
+		log.Fatalf("❌ %v - failed to remove is_paused column from alert_rule.", err)
+	}
+	log.Infoln("✅ alert_rule schema adjusted for Grafana 9.2.20")
+
 	// Connect to Postgres
 	db, err := postgresql.New(*connstring, log)
 	if err != nil {
