@@ -121,4 +121,35 @@ var HexDataChanges = []HexChange{
 		Table:      "preferences",
 		ColumnName: "json_data",
 	},
+	// Dashboard data - fixes HTTP 500 errors when loading dashboards
+	{
+		Table:      "dashboard",
+		ColumnName: "data",
+	},
+	// Alert rule data - fixes "invalid character '\\' after object key:value pair" errors
+	{
+		Table:      "alert_rule",
+		ColumnName: "data",
+	},
+	{
+		Table:      "alert_rule",
+		ColumnName: "annotations",
+	},
+	{
+		Table:      "alert_rule",
+		ColumnName: "labels",
+	},
+	// Alert rule version history
+	{
+		Table:      "alert_rule_version",
+		ColumnName: "data",
+	},
+	{
+		Table:      "alert_rule_version",
+		ColumnName: "annotations",
+	},
+	{
+		Table:      "alert_rule_version",
+		ColumnName: "labels",
+	},
 }
