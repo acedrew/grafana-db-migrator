@@ -86,9 +86,14 @@ func RemoveAlertRulePausedColumn(dumpFile string) error {
 
 	// Match alert_rule INSERT statements and remove the last column (is_paused)
 	// Pattern: INSERT INTO "alert_rule" VALUES(...,rule_group_idx,is_paused);
-	// We want to remove the last value before the closing parenthesis
-	re := regexp.MustCompile(`(?m)(INSERT INTO "alert_rule" VALUES\([^)]+),\d+\);`)
-	sanitized := re.ReplaceAll(data, []byte("$1);"))
+	// The last value before ); is the is_paused column (0 or 1)
+	// We match from INSERT to the end of the statement, handling nested parentheses
+	re := regexp.MustCompile(`INSERT INTO "alert_rule" VALUES\((?:[^()]|\([^)]*\))*,(\d+)\);`)
+	sanitized := re.ReplaceAllFunc(data, func(match []byte) []byte {
+		// Find the last ,<digit>); and remove the ,<digit>
+		lastComma := regexp.MustCompile(`,\d+\);$`)
+		return lastComma.ReplaceAll(match, []byte(");"))
+	})
 
 	return ioutil.WriteFile(dumpFile, sanitized, 0644)
 }
