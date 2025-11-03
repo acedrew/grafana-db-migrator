@@ -85,15 +85,16 @@ func RemoveAlertRulePausedColumn(dumpFile string) error {
 	}
 
 	// Match alert_rule INSERT statements and remove the last column (is_paused)
-	// We use a simple approach: match the entire line from INSERT to semicolon
-	// Then replace the pattern ,<digit>); at the very end with );
-	// This handles complex nested JSON without trying to parse parentheses
-	re := regexp.MustCompile(`(?m)^INSERT INTO "alert_rule" VALUES\(.*?\);$`)
+	// The pattern matches everything from INSERT to the semicolon
+	// (?s) makes . match newlines in case statements span multiple lines
+	re := regexp.MustCompile(`(?s)INSERT INTO "alert_rule" VALUES\(.*?\);`)
+
 	sanitized := re.ReplaceAllFunc(data, func(match []byte) []byte {
 		// Replace the last occurrence of ,<digit>); with );
 		// The is_paused column is always the last value before );
 		lastValuePattern := regexp.MustCompile(`,\d+\);$`)
-		return lastValuePattern.ReplaceAll(match, []byte(");"))
+		result := lastValuePattern.ReplaceAll(match, []byte(");"))
+		return result
 	})
 
 	return ioutil.WriteFile(dumpFile, sanitized, 0644)
