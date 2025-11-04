@@ -94,6 +94,12 @@ func main() {
 		log.Fatalf("❌ %v - failed to perform additional sanitizing of the dump file.", err)
 	}
 	log.Infoln("✅ migration_log statements removed")
+
+	// Remove alert_configuration_history statements (table doesn't exist in Grafana 9.2.20)
+	if err := sqlite.CustomSanitize(dumpPath, `(?msU)[\r\n]+^.*"alert_configuration_history.*;$`, nil); err != nil {
+		log.Fatalf("❌ %v - failed to remove alert_configuration_history statements.", err)
+	}
+	log.Infoln("✅ alert_configuration_history statements removed")
 	// Fix char conversion (char -> chr)
 	if err := sqlite.CustomSanitize(dumpPath, `char\(10\)\)`, []byte("chr(10))")); err != nil {
 		log.Fatalf("❌ %v - failed to perform char keyword sanitizing of the dump file.", err)
