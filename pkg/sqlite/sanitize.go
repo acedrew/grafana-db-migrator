@@ -76,7 +76,7 @@ func HexDecode(dumpFile string) error {
 	return ioutil.WriteFile(dumpFile, sanitized, 0644)
 }
 
-// RemoveAlertRulePausedColumn removes the is_paused column from alert_rule INSERT statements
+// RemoveAlertRulePausedColumn removes the is_paused column from alert_rule and alert_rule_version INSERT statements
 // SQLite may have this column but Grafana 9.2.20 PostgreSQL schema doesn't include it yet
 func RemoveAlertRulePausedColumn(dumpFile string) error {
 	data, err := ioutil.ReadFile(dumpFile)
@@ -92,6 +92,14 @@ func RemoveAlertRulePausedColumn(dumpFile string) error {
 	sanitized := re.ReplaceAllFunc(data, func(match []byte) []byte {
 		// Replace the last occurrence of ,<digit>); with );
 		// The is_paused column is always the last value before );
+		lastValuePattern := regexp.MustCompile(`,\d+\);$`)
+		result := lastValuePattern.ReplaceAll(match, []byte(");"))
+		return result
+	})
+
+	// Also fix alert_rule_version table
+	re = regexp.MustCompile(`(?s)INSERT INTO "alert_rule_version" VALUES\(.*?\);`)
+	sanitized = re.ReplaceAllFunc(sanitized, func(match []byte) []byte {
 		lastValuePattern := regexp.MustCompile(`,\d+\);$`)
 		result := lastValuePattern.ReplaceAll(match, []byte(");"))
 		return result
