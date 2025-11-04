@@ -62,12 +62,22 @@ func (db *DB) ImportDump(dumpFile string) error {
 	}
 
 	sqlStmts := strings.Split(string(file), ";\n")
+	db.log.Infof("📊 Processing %d SQL statements from dump file", len(sqlStmts))
 
-	for _, stmt := range sqlStmts {
+	successCount := 0
+	duplicateCount := 0
+	errorCount := 0
+
+	for i, stmt := range sqlStmts {
+		if len(strings.TrimSpace(stmt)) == 0 {
+			continue
+		}
+
 		if _, err := db.conn.Exec(stmt); err != nil {
 			// We can safely ignore "duplicate key value violates unique constraint" errors.
 			if strings.Contains(err.Error(), "duplicate key") {
-				db.log.Warnf("duplicate key: %s", err)
+				duplicateCount++
+				db.log.Debugf("duplicate key (statement %d): %s", i, err)
 				continue
 			} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
 				// TODO(wbh1): This is absolutely horrible and I am ashamed of this code. Should figure out column types ahead of time.
@@ -79,10 +89,19 @@ func (db *DB) ImportDump(dumpFile string) error {
 					return fmt.Errorf("%v %v", err.Error(), stmt)
 				}
 			} else {
+				errorCount++
 				return fmt.Errorf("%v %v", err.Error(), stmt)
 			}
+		} else {
+			successCount++
+		}
+
+		if (i+1) % 1000 == 0 {
+			db.log.Debugf("Progress: %d/%d statements processed", i+1, len(sqlStmts))
 		}
 	}
+
+	db.log.Infof("📊 Import summary: %d successful, %d duplicates skipped, %d errors", successCount, duplicateCount, errorCount)
 
 	// Fix boolean columns that we converted before.
 	if errorEncountered := db.decodeBooleanColumns(); errorEncountered == true {
