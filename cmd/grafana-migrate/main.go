@@ -90,13 +90,13 @@ func main() {
 	log.Infoln("✅ sqlite3 dump sanitized")
 
 	// Don't bother adding anything to the migration_log table.
-	if err := sqlite.CustomSanitize(dumpPath, `(?msU)[\r\n]+^.*"migration_log.*;$`, nil); err != nil {
+	if err := sqlite.CustomSanitize(dumpPath, `(?m)^INSERT INTO "migration_log" .*;$`, nil); err != nil {
 		log.Fatalf("❌ %v - failed to perform additional sanitizing of the dump file.", err)
 	}
 	log.Infoln("✅ migration_log statements removed")
 
 	// Remove alert_configuration_history statements (table doesn't exist in Grafana 9.2.20)
-	if err := sqlite.CustomSanitize(dumpPath, `(?msU)[\r\n]+^.*"alert_configuration_history.*;$`, nil); err != nil {
+	if err := sqlite.CustomSanitize(dumpPath, `(?s)INSERT INTO "alert_configuration_history" VALUES\(.*?\);`, nil); err != nil {
 		log.Fatalf("❌ %v - failed to remove alert_configuration_history statements.", err)
 	}
 	log.Infoln("✅ alert_configuration_history statements removed")
