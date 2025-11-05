@@ -91,16 +91,17 @@ DECLARE
     r RECORD;
     fixed_count INTEGER := 0;
 BEGIN
-    FOR r IN SELECT id FROM alert_rule WHERE data LIKE '%\%' LOOP
+    FOR r IN SELECT id FROM alert_rule LOOP
         BEGIN
             -- Try to parse as JSON
             PERFORM (SELECT data FROM alert_rule WHERE id = r.id)::jsonb;
         EXCEPTION WHEN OTHERS THEN
-            -- If it fails, fix the backslash escaping
+            -- If it fails, fix the backslash escaping by doubling all backslashes
             UPDATE alert_rule
             SET data = REPLACE(data, E'\\', E'\\\\')
             WHERE id = r.id;
             fixed_count := fixed_count + 1;
+            RAISE DEBUG 'Fixed alert_rule id=%', r.id;
         END;
     END LOOP;
     RAISE NOTICE 'Fixed % alert_rule rows with backslash escaping issues', fixed_count;
