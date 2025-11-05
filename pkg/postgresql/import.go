@@ -162,6 +162,14 @@ func (db *DB) prepareTables() (errorEncountered bool) {
 		errorEncountered = true
 	}
 
+	// Delete auto-created data sources that don't have valid configurations
+	stmt = "DELETE FROM data_source WHERE org_id=1"
+	db.log.Debugln("Executing: ", stmt)
+	if _, err := db.conn.Exec(stmt); err != nil {
+		db.log.Errorf("%v %v", err.Error(), stmt)
+		errorEncountered = true
+	}
+
 	return
 }
 
