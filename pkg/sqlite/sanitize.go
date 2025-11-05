@@ -8,22 +8,20 @@ import (
 
 // Sanitize cleans up a SQLite dump file to prep it for import into Postgres.
 func Sanitize(dumpFile string) error {
-	// Change ` to "
-	re := regexp.MustCompile("`")
 	data, err := ioutil.ReadFile(dumpFile)
 	if err != nil {
 		return err
 	}
-	sanitized := re.ReplaceAll(data, []byte("\""))
 
 	// Remove SQLite-specific PRAGMA statements
 	// and statements that start with BEGIN
 	// and statements pertaining to the sqlite_sequence table.
-	re = regexp.MustCompile(`(?m)[\r\n]?^(PRAGMA.*;|BEGIN.*;|.*sqlite_sequence.*;)$`)
-	sanitized = re.ReplaceAll(sanitized, nil)
+	re := regexp.MustCompile(`(?m)[\r\n]?^(PRAGMA.*;|BEGIN.*;|.*sqlite_sequence.*;)$`)
+	sanitized := re.ReplaceAll(data, nil)
 
 	// Ensure there are quotes around table names to avoid using reserved table names like user.
-	re = regexp.MustCompile(`(?msU)^(INSERT INTO) "?([a-zA-Z0-9_]*)"? (VALUES.*;)$`)
+	// This also converts backticks around table names to double quotes.
+	re = regexp.MustCompile(`(?msU)^(INSERT INTO) ["` + "`" + `]?([a-zA-Z0-9_]*)["` + "`" + `]? (VALUES.*;)$`)
 	sanitized = re.ReplaceAll(sanitized, []byte(`$1 "$2" $3`))
 
 	return ioutil.WriteFile(dumpFile, sanitized, 0644)

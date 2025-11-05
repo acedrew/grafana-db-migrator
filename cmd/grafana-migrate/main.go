@@ -135,11 +135,6 @@ func main() {
 	}
 	log.Infoln("✅ Fixed hex values in Postgres")
 
-	if err := db.FixJSONEscaping(); err != nil {
-		log.Fatalf("❌ %v - failed to fix JSON backslash escaping.", err)
-	}
-	log.Infoln("✅ Fixed JSON backslash escaping in alert rules")
-
 	if *resetHomeDashboard {
 		if err := db.FixHomeDashboard(); err != nil {
 			log.Fatalf("❌ %v - failed to change home dashboard.", err)
