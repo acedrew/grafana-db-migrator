@@ -106,12 +106,15 @@ func (db *DB) ImportDump(dumpFile string) error {
 				if strings.Contains(err.Error(), "duplicate key") {
 					duplicateCount++
 					db.log.Debugf("duplicate key (statement %d): %s", i, err)
-					// Rollback just this statement
+					// Rollback just this statement and release the savepoint
 					if _, err := tx.Exec(fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepointName)); err != nil {
 						tx.Rollback()
 						return fmt.Errorf("failed to rollback to savepoint: %v", err)
 					}
-					// Savepoints are automatically released on commit, don't need to track separately
+					if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
+						tx.Rollback()
+						return fmt.Errorf("failed to release savepoint after rollback: %v", err)
+					}
 					batchSuccess++
 					continue
 				} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
@@ -129,13 +132,23 @@ func (db *DB) ImportDump(dumpFile string) error {
 						tx.Rollback()
 						return fmt.Errorf("%v %v", err.Error(), stmt)
 					}
+					// Release savepoint after successful retry
+					if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
+						tx.Rollback()
+						return fmt.Errorf("failed to release savepoint after retry: %v", err)
+					}
 				} else {
 					errorCount++
 					tx.Rollback()
 					return fmt.Errorf("%v %v", err.Error(), stmt)
 				}
+			} else {
+				// Statement succeeded, release the savepoint
+				if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
+					tx.Rollback()
+					return fmt.Errorf("failed to release savepoint: %v", err)
+				}
 			}
-			// Savepoints are automatically released on commit, no need to manually release
 			batchSuccess++
 		}
 
