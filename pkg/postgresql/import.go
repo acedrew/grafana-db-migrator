@@ -83,12 +83,6 @@ func (db *DB) ImportDump(dumpFile string) error {
 			return fmt.Errorf("failed to begin transaction: %v", err)
 		}
 
-		// Use a savepoint so we can rollback individual statements on duplicate key errors
-		if _, err := tx.Exec("SAVEPOINT batch_start"); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("failed to create savepoint: %v", err)
-		}
-
 		batchSuccess := 0
 		for i := batchStart; i < batchEnd; i++ {
 			stmt := sqlStmts[i]
@@ -96,26 +90,29 @@ func (db *DB) ImportDump(dumpFile string) error {
 				continue
 			}
 
+			// Create a savepoint before each statement so we can rollback just this one on error
+			savepointName := fmt.Sprintf("sp_%d", i)
+			if _, err := tx.Exec(fmt.Sprintf("SAVEPOINT %s", savepointName)); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to create savepoint: %v", err)
+			}
+
 			if _, err := tx.Exec(stmt); err != nil {
 				// We can safely ignore "duplicate key value violates unique constraint" errors.
 				if strings.Contains(err.Error(), "duplicate key") {
 					duplicateCount++
 					db.log.Debugf("duplicate key (statement %d): %s", i, err)
-					// Rollback to savepoint to continue with other statements
-					if _, err := tx.Exec("ROLLBACK TO SAVEPOINT batch_start"); err != nil {
+					// Rollback just this statement
+					if _, err := tx.Exec(fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepointName)); err != nil {
 						tx.Rollback()
 						return fmt.Errorf("failed to rollback to savepoint: %v", err)
-					}
-					if _, err := tx.Exec("SAVEPOINT batch_start"); err != nil {
-						tx.Rollback()
-						return fmt.Errorf("failed to recreate savepoint: %v", err)
 					}
 					continue
 				} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
 					// TODO(wbh1): This is absolutely horrible and I am ashamed of this code. Should figure out column types ahead of time.
 					db.log.Debugf("Failed to import because of type issue (%v). Trying to fix...\n", err.Error())
-					// Rollback to savepoint first
-					if _, err := tx.Exec("ROLLBACK TO SAVEPOINT batch_start"); err != nil {
+					// Rollback this statement and try with fixed version
+					if _, err := tx.Exec(fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepointName)); err != nil {
 						tx.Rollback()
 						return fmt.Errorf("failed to rollback to savepoint: %v", err)
 					}
@@ -126,14 +123,16 @@ func (db *DB) ImportDump(dumpFile string) error {
 						tx.Rollback()
 						return fmt.Errorf("%v %v", err.Error(), stmt)
 					}
-					if _, err := tx.Exec("SAVEPOINT batch_start"); err != nil {
-						tx.Rollback()
-						return fmt.Errorf("failed to recreate savepoint: %v", err)
-					}
 				} else {
 					errorCount++
 					tx.Rollback()
 					return fmt.Errorf("%v %v", err.Error(), stmt)
+				}
+			} else {
+				// Release the savepoint to free resources
+				if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
+					tx.Rollback()
+					return fmt.Errorf("failed to release savepoint: %v", err)
 				}
 			}
 			batchSuccess++
