@@ -84,11 +84,15 @@ func (db *DB) ImportDump(dumpFile string) error {
 		}
 
 		batchSuccess := 0
+		batchHasStatements := false
+
 		for i := batchStart; i < batchEnd; i++ {
 			stmt := sqlStmts[i]
 			if len(strings.TrimSpace(stmt)) == 0 {
 				continue
 			}
+
+			batchHasStatements = true
 
 			// Create a savepoint before each statement so we can rollback just this one on error
 			savepointName := fmt.Sprintf("sp_%d", i)
@@ -135,9 +139,14 @@ func (db *DB) ImportDump(dumpFile string) error {
 			batchSuccess++
 		}
 
-		// Commit the transaction
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit transaction: %v", err)
+		// Commit the transaction only if we actually executed statements
+		if batchHasStatements {
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("failed to commit transaction: %v", err)
+			}
+		} else {
+			// Rollback empty transaction
+			tx.Rollback()
 		}
 
 		successCount += batchSuccess
