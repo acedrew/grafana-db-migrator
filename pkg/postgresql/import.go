@@ -83,6 +83,12 @@ func (db *DB) ImportDump(dumpFile string) error {
 			return fmt.Errorf("failed to begin transaction: %v", err)
 		}
 
+		// Use a savepoint so we can rollback individual statements on duplicate key errors
+		if _, err := tx.Exec("SAVEPOINT batch_start"); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to create savepoint: %v", err)
+		}
+
 		batchSuccess := 0
 		for i := batchStart; i < batchEnd; i++ {
 			stmt := sqlStmts[i]
@@ -95,16 +101,34 @@ func (db *DB) ImportDump(dumpFile string) error {
 				if strings.Contains(err.Error(), "duplicate key") {
 					duplicateCount++
 					db.log.Debugf("duplicate key (statement %d): %s", i, err)
+					// Rollback to savepoint to continue with other statements
+					if _, err := tx.Exec("ROLLBACK TO SAVEPOINT batch_start"); err != nil {
+						tx.Rollback()
+						return fmt.Errorf("failed to rollback to savepoint: %v", err)
+					}
+					if _, err := tx.Exec("SAVEPOINT batch_start"); err != nil {
+						tx.Rollback()
+						return fmt.Errorf("failed to recreate savepoint: %v", err)
+					}
 					continue
 				} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
 					// TODO(wbh1): This is absolutely horrible and I am ashamed of this code. Should figure out column types ahead of time.
 					db.log.Debugf("Failed to import because of type issue (%v). Trying to fix...\n", err.Error())
+					// Rollback to savepoint first
+					if _, err := tx.Exec("ROLLBACK TO SAVEPOINT batch_start"); err != nil {
+						tx.Rollback()
+						return fmt.Errorf("failed to rollback to savepoint: %v", err)
+					}
 					stmt = strings.Replace(
 						strings.Replace(stmt, `,convert_from('\x`, ",decode('", 1),
 						"'utf-8'", "'hex'", 1)
 					if _, err := tx.Exec(stmt); err != nil {
 						tx.Rollback()
 						return fmt.Errorf("%v %v", err.Error(), stmt)
+					}
+					if _, err := tx.Exec("SAVEPOINT batch_start"); err != nil {
+						tx.Rollback()
+						return fmt.Errorf("failed to recreate savepoint: %v", err)
 					}
 				} else {
 					errorCount++
