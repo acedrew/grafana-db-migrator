@@ -220,6 +220,8 @@ func (db *DB) prepareTables() (errorEncountered bool) {
 func (db *DB) decodeBooleanColumns() bool {
 
 	var errorEncountered bool
+	successCount := 0
+	skipCount := 0
 
 	for _, table := range TableChanges {
 		for _, column := range table.Columns {
@@ -228,10 +230,14 @@ func (db *DB) decodeBooleanColumns() bool {
 			if _, err := db.conn.Exec(stmt); err != nil {
 				if strings.Contains(err.Error(), "does not exist") {
 					db.log.Debugf("%s %v %v", "Column/table doesn't exist. This is usually fine to ignore, but here's the info:", err.Error(), stmt)
+					skipCount++
 				} else {
 					db.log.Warnf("%v %v", err.Error(), stmt)
 					errorEncountered = true
 				}
+			} else {
+				successCount++
+				db.log.Debugf("✅ Converted %s.%s to boolean", table.Table, column.Name)
 			}
 
 			// If the column has a default value associated with it, drop it.
@@ -250,6 +256,8 @@ func (db *DB) decodeBooleanColumns() bool {
 
 		} // end column loop
 	} // end table loop
+
+	db.log.Infof("💡 Boolean column conversion: %d successful, %d skipped (table/column doesn't exist)", successCount, skipCount)
 
 	return errorEncountered
 }
