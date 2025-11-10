@@ -68,102 +68,37 @@ func (db *DB) ImportDump(dumpFile string) error {
 	duplicateCount := 0
 	errorCount := 0
 
-	// Batch statements into transactions for better performance
-	const batchSize = 1000
-
-	for batchStart := 0; batchStart < len(sqlStmts); batchStart += batchSize {
-		batchEnd := batchStart + batchSize
-		if batchEnd > len(sqlStmts) {
-			batchEnd = len(sqlStmts)
+	for i, stmt := range sqlStmts {
+		if len(strings.TrimSpace(stmt)) == 0 {
+			continue
 		}
 
-		// Begin transaction for this batch
-		tx, err := db.conn.Begin()
-		if err != nil {
-			return fmt.Errorf("failed to begin transaction: %v", err)
-		}
-
-		batchSuccess := 0
-		batchHasStatements := false
-
-		for i := batchStart; i < batchEnd; i++ {
-			stmt := sqlStmts[i]
-			if len(strings.TrimSpace(stmt)) == 0 {
+		if _, err := db.conn.Exec(stmt); err != nil {
+			// We can safely ignore "duplicate key value violates unique constraint" errors.
+			if strings.Contains(err.Error(), "duplicate key") {
+				duplicateCount++
+				db.log.Debugf("duplicate key (statement %d): %s", i, err)
 				continue
-			}
-
-			batchHasStatements = true
-
-			// Create a savepoint before each statement so we can rollback just this one on error
-			savepointName := fmt.Sprintf("sp_%d", i)
-			if _, err := tx.Exec(fmt.Sprintf("SAVEPOINT %s", savepointName)); err != nil {
-				tx.Rollback()
-				return fmt.Errorf("failed to create savepoint: %v", err)
-			}
-
-			if _, err := tx.Exec(stmt); err != nil {
-				// We can safely ignore "duplicate key value violates unique constraint" errors.
-				if strings.Contains(err.Error(), "duplicate key") {
-					duplicateCount++
-					db.log.Debugf("duplicate key (statement %d): %s", i, err)
-					// Rollback just this statement and release the savepoint
-					if _, err := tx.Exec(fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepointName)); err != nil {
-						tx.Rollback()
-						return fmt.Errorf("failed to rollback to savepoint: %v", err)
-					}
-					if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
-						tx.Rollback()
-						return fmt.Errorf("failed to release savepoint after rollback: %v", err)
-					}
-					batchSuccess++
-					continue
-				} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
-					// TODO(wbh1): This is absolutely horrible and I am ashamed of this code. Should figure out column types ahead of time.
-					db.log.Debugf("Failed to import because of type issue (%v). Trying to fix...\n", err.Error())
-					// Rollback this statement and try with fixed version
-					if _, err := tx.Exec(fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepointName)); err != nil {
-						tx.Rollback()
-						return fmt.Errorf("failed to rollback to savepoint: %v", err)
-					}
-					stmt = strings.Replace(
-						strings.Replace(stmt, `,convert_from('\x`, ",decode('", 1),
-						"'utf-8'", "'hex'", 1)
-					if _, err := tx.Exec(stmt); err != nil {
-						tx.Rollback()
-						return fmt.Errorf("%v %v", err.Error(), stmt)
-					}
-					// Release savepoint after successful retry
-					if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
-						tx.Rollback()
-						return fmt.Errorf("failed to release savepoint after retry: %v", err)
-					}
-				} else {
-					errorCount++
-					tx.Rollback()
+			} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
+				// TODO(wbh1): This is absolutely horrible and I am ashamed of this code. Should figure out column types ahead of time.
+				db.log.Debugf("Failed to import because of type issue (%v). Trying to fix...\n", err.Error())
+				stmt = strings.Replace(
+					strings.Replace(stmt, `,convert_from('\x`, ",decode('", 1),
+					"'utf-8'", "'hex'", 1)
+				if _, err := db.conn.Exec(stmt); err != nil {
 					return fmt.Errorf("%v %v", err.Error(), stmt)
 				}
 			} else {
-				// Statement succeeded, release the savepoint
-				if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
-					tx.Rollback()
-					return fmt.Errorf("failed to release savepoint: %v", err)
-				}
-			}
-			batchSuccess++
-		}
-
-		// Commit the transaction only if we actually executed statements
-		if batchHasStatements {
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("failed to commit transaction: %v", err)
+				errorCount++
+				return fmt.Errorf("%v %v", err.Error(), stmt)
 			}
 		} else {
-			// Rollback empty transaction
-			tx.Rollback()
+			successCount++
 		}
 
-		successCount += batchSuccess
-		db.log.Debugf("Progress: %d/%d statements processed (%d in this batch)", batchEnd, len(sqlStmts), batchSuccess)
+		if (i+1) % 1000 == 0 {
+			db.log.Debugf("Progress: %d/%d statements processed", i+1, len(sqlStmts))
+		}
 	}
 
 	db.log.Infof("📊 Import summary: %d successful, %d duplicates skipped, %d errors", successCount, duplicateCount, errorCount)
