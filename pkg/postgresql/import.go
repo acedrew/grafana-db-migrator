@@ -107,6 +107,8 @@ func (db *DB) ImportDump(dumpFile string) error {
 						tx.Rollback()
 						return fmt.Errorf("failed to rollback to savepoint: %v", err)
 					}
+					// Savepoints are automatically released on commit, don't need to track separately
+					batchSuccess++
 					continue
 				} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
 					// TODO(wbh1): This is absolutely horrible and I am ashamed of this code. Should figure out column types ahead of time.
@@ -128,13 +130,8 @@ func (db *DB) ImportDump(dumpFile string) error {
 					tx.Rollback()
 					return fmt.Errorf("%v %v", err.Error(), stmt)
 				}
-			} else {
-				// Release the savepoint to free resources
-				if _, err := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); err != nil {
-					tx.Rollback()
-					return fmt.Errorf("failed to release savepoint: %v", err)
-				}
 			}
+			// Savepoints are automatically released on commit, no need to manually release
 			batchSuccess++
 		}
 
