@@ -135,6 +135,11 @@ func main() {
 	}
 	log.Infoln("✅ Fixed hex values in Postgres")
 
+	// Verify boolean columns were converted correctly and fix any that weren't
+	if err := db.VerifyAndFixBooleanColumns(); err != nil {
+		log.Fatalf("❌ %v - failed to verify/fix boolean columns.", err)
+	}
+
 	if *resetHomeDashboard {
 		if err := db.FixHomeDashboard(); err != nil {
 			log.Fatalf("❌ %v - failed to change home dashboard.", err)

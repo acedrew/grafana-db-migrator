@@ -141,6 +141,86 @@ func (db *DB) ChangeCharToText() error {
 	return nil
 }
 
+// VerifyAndFixBooleanColumns checks for any integer columns that should be boolean and fixes them
+func (db *DB) VerifyAndFixBooleanColumns() error {
+	db.log.Info("🔍 Verifying boolean column conversions...")
+
+	// Query to find columns that are still integers but should be boolean
+	query := `
+		SELECT table_name, column_name, data_type
+		FROM information_schema.columns
+		WHERE table_schema = 'public'
+		AND data_type = 'integer'
+		AND (
+			(table_name = 'user' AND column_name IN ('is_admin', 'email_verified', 'is_disabled', 'is_service_account'))
+			OR (table_name = 'alert' AND column_name = 'silenced')
+			OR (table_name = 'alert_configuration' AND column_name = 'default')
+			OR (table_name = 'alert_notification' AND column_name IN ('is_default', 'send_reminder', 'disable_resolve_message'))
+			OR (table_name = 'dashboard' AND column_name IN ('is_folder', 'has_acl', 'is_public'))
+			OR (table_name = 'dashboard_snapshot' AND column_name = 'external')
+			OR (table_name = 'data_source' AND column_name IN ('basic_auth', 'is_default', 'read_only', 'with_credentials'))
+			OR (table_name = 'migration_log' AND column_name = 'success')
+			OR (table_name = 'plugin_setting' AND column_name IN ('enabled', 'pinned'))
+			OR (table_name = 'team_member' AND column_name = 'external')
+			OR (table_name = 'temp_user' AND column_name = 'email_sent')
+			OR (table_name = 'user_auth_token' AND column_name = 'auth_token_seen')
+			OR (table_name = 'role' AND column_name = 'hidden')
+			OR (table_name = 'data_keys' AND column_name = 'active')
+			OR (table_name = 'api_key' AND column_name = 'is_revoked')
+		)
+		ORDER BY table_name, column_name;
+	`
+
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return fmt.Errorf("failed to query column types: %v", err)
+	}
+	defer rows.Close()
+
+	type columnInfo struct {
+		tableName  string
+		columnName string
+		dataType   string
+	}
+
+	var problematicColumns []columnInfo
+	for rows.Next() {
+		var ci columnInfo
+		if err := rows.Scan(&ci.tableName, &ci.columnName, &ci.dataType); err != nil {
+			return fmt.Errorf("failed to scan row: %v", err)
+		}
+		problematicColumns = append(problematicColumns, ci)
+	}
+
+	if len(problematicColumns) == 0 {
+		db.log.Info("✅ All boolean columns are correctly typed")
+		return nil
+	}
+
+	db.log.Warnf("⚠️  Found %d columns that are still integers, converting to boolean...", len(problematicColumns))
+
+	// Fix each column
+	for _, ci := range problematicColumns {
+		tableName := ci.tableName
+		if tableName == "user" {
+			tableName = `"user"` // Quote reserved keyword
+		}
+
+		stmt := fmt.Sprintf(
+			"ALTER TABLE %s ALTER COLUMN %s TYPE boolean USING CASE WHEN %s = 0 THEN FALSE WHEN %s = 1 THEN TRUE ELSE NULL END",
+			tableName, ci.columnName, ci.columnName, ci.columnName,
+		)
+
+		db.log.Debugf("Executing: %s", stmt)
+		if _, err := db.conn.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to convert %s.%s: %v", ci.tableName, ci.columnName, err)
+		}
+		db.log.Infof("✅ Converted %s.%s from integer to boolean", ci.tableName, ci.columnName)
+	}
+
+	return nil
+}
+
 // HexChange documents a table that needs to be changed
 // and specificly which Columns need to be changed.
 type HexChange struct {
